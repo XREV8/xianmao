@@ -1046,20 +1046,72 @@ export default function App() {
     if (!supabase) return; // 没配置就用本地演示数据
     const load = async () => {
       const { data: prods } = await supabase.from("products").select("*").order("created_at", { ascending: false });
-      if (prods && prods.length > 0) setProducts(prods);
+      if (prods && prods.length > 0) {
+        setProducts(prods.map(p => ({
+          sellerId: 0,
+          av:       p.seller?.[0] || "?",
+          rating:   p.rating  ?? 5.0,
+          views:    p.views   ?? 0,
+          likes:    p.likes   ?? 0,
+          reported: p.reported ?? false,
+          ...p,
+        })));
+      }
       setDbReady(true);
     };
     load();
-    // 实时监听新商品
-    const sub = supabase.channel("products").on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => load()).subscribe();
-    return () => supabase.removeChannel(sub);
+    // 实时监听新商品（订阅失败静默处理，不影响主功能）
+    let sub;
+    try {
+      sub = supabase
+        .channel("products")
+        .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => load())
+        .subscribe(status => {
+          if (status === "CHANNEL_ERROR") console.warn("Realtime 订阅受限，将使用手动刷新");
+        });
+    } catch (e) {
+      console.warn("Realtime 不可用:", e);
+    }
+    return () => { if (sub) supabase.removeChannel(sub); };
   }, []);
 
   // ── CRUD 操作（有 Supabase 用数据库，否则用本地） ──────
   const addProduct = async p => {
     if (supabase) {
-      const { data } = await supabase.from("products").insert([{ ...p, id: undefined }]).select().single();
-      if (data) setProducts(ps => [data, ...ps]);
+      // 只插入数据库实际存在的列，避免 400 错误
+      const dbPayload = {
+        title:  p.title,
+        desc:   p.desc,
+        price:  p.price,
+        cat:    p.cat,
+        loc:    p.loc,
+        cond:   p.cond,
+        img:    p.img,
+        seller: p.seller,
+        status: p.status,
+      };
+      const { data, error } = await supabase
+        .from("products")
+        .insert([dbPayload])
+        .select()
+        .single();
+      if (error) {
+        console.error("发布失败:", error);
+        alert("发布失败：" + error.message);
+        return;
+      }
+      if (data) {
+        // 将 DB 返回数据与前端显示所需的默认值合并
+        setProducts(ps => [{
+          sellerId: 0,
+          av:       p.seller?.[0] || "我",
+          rating:   5.0,
+          views:    0,
+          likes:    0,
+          reported: false,
+          ...data,
+        }, ...ps]);
+      }
     } else {
       setProducts(ps => [p, ...ps]);
     }

@@ -35,7 +35,7 @@ import { useState, useEffect, useRef, createContext, useContext } from "react";
    CONSTANTS & DATA
 ══════════════════════════════════════════════════════════ */
 const OR = "#F97316";
-const CATS = ["全部","手机数码","时尚服饰","包袋配件","家居生活","美妆护肤","潮玩收藏","书籍","游戏周边"];
+const CATS = ["全部","手机数码","时尚服饰","包袋配件","家居生活","美妆护肤","潮玩收藏","书籍","游戏周边","酒店住宿","机票代订","旅游服务","餐饮美食","教育培训","汽车摩托","宠物用品","运动健身","母婴用品"];
 const LOCS = ["新加坡","吉隆坡","槟城","曼谷","雅加达","胡志明市","马尼拉","东京"];
 const CONDS = ["全新","近全新","九成新","八成新","七成新"];
 const ADMIN_PASS = "admin888";
@@ -94,15 +94,31 @@ function useApp() { return useContext(AppCtx); }
    AI HELPER
 ══════════════════════════════════════════════════════════ */
 async function aiGenerate(name, cat) {
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    // 没有API Key时返回模板内容
+    return {
+      title: `${name} 出售转让`,
+      description: `出售${name}，${cat}类商品，成色良好，价格实惠，有意者请联系，可议价，同城可面交验货。`,
+      suggestedPrice: 500,
+      condition: "九成新",
+      sellingPoints: ["价格实惠","成色良好","可议价"]
+    };
+  }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { 
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514", max_tokens: 1000,
+      model: "claude-haiku-4-5-20251001", max_tokens: 1000,
       messages: [{ role: "user", content:
         `你是东南亚二手交易平台AI助手。商品：${name}，类别：${cat}。
 返回JSON（仅JSON，无其他文字）：
-{"title":"吸引人标题最多25字","description":"自然真实描述约100字包括成色使用情况出售原因附件","suggestedPrice":建议售价马币整数,"condition":"成色（全新/近全新/九成新/八成新/七成新）","sellingPoints":["卖点一","卖点二","卖点三"]}`
+{"title":"吸引人标题最多25字","description":"自然真实描述约100字","suggestedPrice":建议售价马币整数,"condition":"成色（全新/近全新/九成新/八成新/七成新）","sellingPoints":["卖点一","卖点二","卖点三"]}`
       }]
     })
   });

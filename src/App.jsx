@@ -1,4 +1,9 @@
 import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 /* ══════════════════════════════════════════════════════════
    GLOBAL STYLES
@@ -38,7 +43,8 @@ const OR = "#F97316";
 const CATS = ["全部","手机数码","时尚服饰","包袋配件","家居生活","美妆护肤","潮玩收藏","书籍","游戏周边","酒店住宿","机票代订","旅游服务","餐饮美食","教育培训","汽车摩托","宠物用品","运动健身","母婴用品"];
 const LOCS = ["新加坡","吉隆坡","槟城","曼谷","雅加达","胡志明市","马尼拉","东京"];
 const CONDS = ["全新","近全新","九成新","八成新","七成新"];
-const ADMIN_PASS = "admin888";
+const ADMIN_PASS_KEY = "xianmao_admin_pass";
+const getAdminPass = () => localStorage.getItem(ADMIN_PASS_KEY) || "admin888";
 const fmt = n => `RM ${Number(n).toLocaleString()}`;
 
 const INIT_USERS = [
@@ -501,7 +507,7 @@ function ProfileView() {
   const menus = [["📦","我的订单"],["❤️","我的收藏"],["🔔","消息通知"],["⚙️","账号设置"],["🛡️","实名认证"],["💬","联系客服"]];
 
   const adminLogin = () => {
-    if (pass === ADMIN_PASS) { setMode("admin"); } 
+    if (pass === getAdminPass()) { setMode("admin"); } 
     else { setErr(true); setTimeout(()=>setErr(false),1500); }
   };
 
@@ -867,8 +873,24 @@ function AdminReports({ reports, updateReport, products, users, updateProduct, u
 function AdminSettings() {
   const [settings, setSettings] = useState({ appName:"闲猫市集", requireReview:true, allowChat:true, commissionRate:"2.5", maxPhotos:"9", announcement:"欢迎使用闲猫市集！" });
   const [saved, setSaved] = useState(false);
+  const [oldPass, setOldPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [passMsg, setPassMsg] = useState("");
+  const [passOk, setPassOk] = useState(false);
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
   const inp = { width:"100%", padding:"10px 13px", borderRadius:10, border:"1.5px solid #F0EBE5", outline:"none", fontSize:14, background:"#fafaf9" };
+
+  const changePass = () => {
+    if (oldPass !== getAdminPass()) { setPassMsg("原密码错误"); setPassOk(false); return; }
+    if (newPass.length < 6) { setPassMsg("新密码至少6位"); setPassOk(false); return; }
+    if (newPass !== confirmPass) { setPassMsg("两次密码不一致"); setPassOk(false); return; }
+    localStorage.setItem(ADMIN_PASS_KEY, newPass);
+    setPassMsg("密码修改成功！"); setPassOk(true);
+    setOldPass(""); setNewPass(""); setConfirmPass("");
+    setTimeout(()=>setPassMsg(""), 3000);
+  };
+
   return (
     <div style={{ padding:28, overflowY:"auto", flex:1 }}>
       <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, marginBottom:20 }}>平台设置</p>
@@ -892,6 +914,7 @@ function AdminSettings() {
             <input value={settings.maxPhotos} onChange={e=>set("maxPhotos",e.target.value)} type="number" style={inp} />
           </div>
         </div>
+
         <div style={{ background:"#fff", borderRadius:14, padding:24, boxShadow:"0 2px 8px rgba(0,0,0,.06)", marginBottom:16 }}>
           <p style={{ fontWeight:700, fontSize:14, marginBottom:16 }}>功能开关</p>
           {[["requireReview","新商品需审核才可展示"],["allowChat","允许用户站内聊天"]].map(([k,lb])=>(
@@ -906,6 +929,29 @@ function AdminSettings() {
             </div>
           ))}
         </div>
+
+        {/* Password Change */}
+        <div style={{ background:"#fff", borderRadius:14, padding:24, boxShadow:"0 2px 8px rgba(0,0,0,.06)", marginBottom:16 }}>
+          <p style={{ fontWeight:700, fontSize:14, marginBottom:16 }}>🔐 修改管理员密码</p>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:13, fontWeight:600, display:"block", marginBottom:6 }}>原密码</label>
+            <input value={oldPass} onChange={e=>setOldPass(e.target.value)} type="password" placeholder="输入原密码" style={inp} />
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:13, fontWeight:600, display:"block", marginBottom:6 }}>新密码（至少6位）</label>
+            <input value={newPass} onChange={e=>setNewPass(e.target.value)} type="password" placeholder="输入新密码" style={inp} />
+          </div>
+          <div style={{ marginBottom:14 }}>
+            <label style={{ fontSize:13, fontWeight:600, display:"block", marginBottom:6 }}>确认新密码</label>
+            <input value={confirmPass} onChange={e=>setConfirmPass(e.target.value)} type="password" placeholder="再次输入新密码" style={inp} />
+          </div>
+          {passMsg && <p style={{ fontSize:13, color:passOk?"#16a34a":"#ef4444", marginBottom:10, fontWeight:500 }}>{passOk?"✅":"❌"} {passMsg}</p>}
+          <button className="press" onClick={changePass} style={{
+            width:"100%", height:42, borderRadius:10, background:OR, color:"#fff",
+            fontWeight:700, fontSize:14, boxShadow:"0 3px 10px rgba(249,115,22,.3)"
+          }}>修改密码</button>
+        </div>
+
         <button className="press" onClick={()=>{ setSaved(true); setTimeout(()=>setSaved(false),2000); }} style={{
           width:"100%", height:46, borderRadius:12, background:saved?"#16a34a":OR, color:"#fff",
           fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:15, transition:"background .3s",
@@ -986,25 +1032,67 @@ function MessagesShell() {
    ROOT APP
 ══════════════════════════════════════════════════════════ */
 export default function App() {
-  const [mode, setMode] = useState("user"); // "user" | "admin"
+  const [mode, setMode] = useState("user");
   const [view, setView] = useState("home");
   const [products, setProducts] = useState(INIT_PRODUCTS);
   const [users, setUsers] = useState(INIT_USERS);
   const [reports, setReports] = useState(INIT_REPORTS);
   const [selected, setSelected] = useState(null);
   const [chat, setChat] = useState(null);
+  const [dbReady, setDbReady] = useState(false);
 
-  const addProduct = p => setProducts(ps=>[p,...ps]);
-  const updateProduct = (id, patch) => setProducts(ps=>ps.map(p=>p.id===id?{...p,...patch}:p));
-  const deleteProduct = id => setProducts(ps=>ps.filter(p=>p.id!==id));
-  const updateUser = (id, patch) => setUsers(us=>us.map(u=>u.id===id?{...u,...patch}:u));
-  const updateReport = (id, patch) => setReports(rs=>rs.map(r=>r.id===id?{...r,...patch}:r));
+  // ── 从 Supabase 加载数据 ──────────────────────────────
+  useEffect(() => {
+    if (!supabase) return; // 没配置就用本地演示数据
+    const load = async () => {
+      const { data: prods } = await supabase.from("products").select("*").order("created_at", { ascending: false });
+      if (prods && prods.length > 0) setProducts(prods);
+      setDbReady(true);
+    };
+    load();
+    // 实时监听新商品
+    const sub = supabase.channel("products").on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => load()).subscribe();
+    return () => supabase.removeChannel(sub);
+  }, []);
 
-  const ctx = { mode, setMode, view, setView, products, users, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, updateUser, updateReport };
+  // ── CRUD 操作（有 Supabase 用数据库，否则用本地） ──────
+  const addProduct = async p => {
+    if (supabase) {
+      const { data } = await supabase.from("products").insert([{ ...p, id: undefined }]).select().single();
+      if (data) setProducts(ps => [data, ...ps]);
+    } else {
+      setProducts(ps => [p, ...ps]);
+    }
+  };
+
+  const updateProduct = async (id, patch) => {
+    if (supabase) {
+      await supabase.from("products").update(patch).eq("id", id);
+    }
+    setProducts(ps => ps.map(p => p.id === id ? { ...p, ...patch } : p));
+  };
+
+  const deleteProduct = async id => {
+    if (supabase) {
+      await supabase.from("products").delete().eq("id", id);
+    }
+    setProducts(ps => ps.filter(p => p.id !== id));
+  };
+
+  const updateUser = (id, patch) => setUsers(us => us.map(u => u.id === id ? { ...u, ...patch } : u));
+  const updateReport = (id, patch) => setReports(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+
+  const ctx = { mode, setMode, view, setView, products, users, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, updateUser, updateReport, dbReady };
 
   return (
     <AppCtx.Provider value={ctx}>
       <div style={{ height:"100vh", background: mode==="admin"?"#f8fafc":"#FFFBF7" }}>
+        {supabase && !dbReady && (
+          <div style={{ position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(255,255,255,.9)", zIndex:9999, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+            <p style={{ fontSize:36 }}>🐟</p>
+            <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:16, marginTop:12, color:"#18181B" }}>正在连接数据库…</p>
+          </div>
+        )}
         {mode==="admin" ? <AdminApp /> : <UserApp />}
       </div>
     </AppCtx.Provider>

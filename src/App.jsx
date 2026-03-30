@@ -398,6 +398,58 @@ function PostView() {
 }
 
 /* ══════════════════════════════════════════════════════════
+   MY PRODUCT CARD (用户管理自己的商品)
+══════════════════════════════════════════════════════════ */
+function MyProductCard({ p }) {
+  const { updateProduct, deleteProduct, setSelected, setView } = useApp();
+  const [confirm, setConfirm] = useState(false);
+
+  const statusColor = { "已上架":"#16a34a", "待审核":OR, "已下架":"#6b7280" };
+
+  return (
+    <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,.06)", display:"flex", gap:0, animation:"slideUp .3s ease" }}>
+      {/* 图片 */}
+      <img
+        src={p.img || "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200"}
+        style={{ width:90, height:90, objectFit:"cover", flexShrink:0, cursor:"pointer" }}
+        onClick={()=>{ setSelected(p); setView("detail"); }}
+      />
+      {/* 内容 */}
+      <div style={{ flex:1, padding:"10px 12px", display:"flex", flexDirection:"column", justifyContent:"space-between", minWidth:0 }}>
+        <div>
+          <p style={{ fontSize:13, fontWeight:600, lineHeight:1.35, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{p.title}</p>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
+            <p style={{ fontSize:15, fontWeight:800, color:OR, fontFamily:"Syne,sans-serif" }}>RM {p.price}</p>
+            <span style={{ fontSize:11, fontWeight:600, color: statusColor[p.status] || "#6b7280" }}>● {p.status}</span>
+          </div>
+          <p style={{ fontSize:11, color:"#78716C", marginTop:2 }}>👁 {p.views||0} 浏览 · ❤️ {p.likes||0} 收藏</p>
+        </div>
+        {/* 操作按钮 */}
+        <div style={{ display:"flex", gap:6, marginTop:8 }}>
+          {p.status === "已上架" && (
+            <button className="press" onClick={()=>updateProduct(p.id,{status:"已下架"})} style={{ flex:1, padding:"6px 0", borderRadius:8, fontSize:12, fontWeight:600, background:"#fff7ed", color:OR, border:"1px solid #fed7aa" }}>下架</button>
+          )}
+          {p.status === "已下架" && (
+            <button className="press" onClick={()=>updateProduct(p.id,{status:"已上架"})} style={{ flex:1, padding:"6px 0", borderRadius:8, fontSize:12, fontWeight:600, background:"#f0fdf4", color:"#16a34a", border:"1px solid #bbf7d0" }}>重新上架</button>
+          )}
+          {p.status === "待审核" && (
+            <span style={{ flex:1, padding:"6px 0", borderRadius:8, fontSize:12, fontWeight:600, color:OR, textAlign:"center", background:"#fff7ed", border:"1px solid #fed7aa" }}>审核中…</span>
+          )}
+          {!confirm ? (
+            <button className="press" onClick={()=>setConfirm(true)} style={{ padding:"6px 12px", borderRadius:8, fontSize:12, fontWeight:600, background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca" }}>删除</button>
+          ) : (
+            <div style={{ display:"flex", gap:4 }}>
+              <button className="press" onClick={()=>deleteProduct(p.id)} style={{ padding:"6px 10px", borderRadius:8, fontSize:12, fontWeight:700, background:"#dc2626", color:"#fff" }}>确认</button>
+              <button className="press" onClick={()=>setConfirm(false)} style={{ padding:"6px 10px", borderRadius:8, fontSize:12, fontWeight:600, background:"#f3f4f6", color:"#6b7280" }}>取消</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
    PROFILE VIEW
 ══════════════════════════════════════════════════════════ */
 function ProfileView() {
@@ -458,13 +510,22 @@ function ProfileView() {
         </div>
       </div>
       <div style={{ padding:16 }}>
-        {mine.length > 0 && (
-          <>
-            <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:15, marginBottom:12 }}>我发布的</p>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-              {mine.slice(0,4).map(p=><ProductCard key={p.id} p={p} onClick={()=>{}} />)}
-            </div>
-          </>
+        {/* 我的商品管理 */}
+        <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:15, marginBottom:12 }}>
+          我发布的商品 <span style={{ fontSize:12, color:"#78716C", fontWeight:400 }}>({mine.length})</span>
+        </p>
+        {mine.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"30px 0", color:"#78716C", background:"#fff", borderRadius:14, marginBottom:16 }}>
+            <p style={{ fontSize:32 }}>📦</p>
+            <p style={{ fontSize:14, marginTop:8 }}>还没有发布过商品</p>
+            <button className="press" onClick={()=>setView("post")} style={{ marginTop:12, background:OR, color:"#fff", padding:"10px 24px", borderRadius:10, fontSize:13, fontWeight:600 }}>去发布第一件</button>
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
+            {mine.map(p=>(
+              <MyProductCard key={p.id} p={p} />
+            ))}
+          </div>
         )}
         <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
           {menus.map(([ic,lb],i)=>(

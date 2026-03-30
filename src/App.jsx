@@ -576,40 +576,134 @@ function ProfileView() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   CHAT VIEW
+   CHAT VIEW — 真实聊天
 ══════════════════════════════════════════════════════════ */
 function ChatView() {
-  const { chat, setView } = useApp();
-  const [msgs, setMsgs] = useState([{ from:"seller", text:`你好！我是 ${chat?.name}，有什么可以帮到你的？😊` }]);
+  const { chat, setView, user, setShowAuth } = useApp();
+  const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
   const endRef = useRef();
-  const auto = ["好的，可以稍等一下～","价格可以再商量哦","同城的话可以面交验货","这个商品成色真的很好！","我们可以用平台担保交易"];
-  useEffect(()=>{ endRef.current?.scrollIntoView({ behavior:"smooth" }); },[msgs]);
-  const send = () => {
-    if (!input.trim()) return;
-    const t = input.trim(); setInput("");
-    setMsgs(m=>[...m,{from:"me",text:t}]);
-    setTimeout(()=>setMsgs(m=>[...m,{from:"seller",text:auto[Math.floor(Math.random()*auto.length)]}]), 800+Math.random()*500);
+
+  // 未登录
+  if (!user) return (
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"#FFFBF7", padding:32 }}>
+      <p style={{ fontSize:48 }}>💬</p>
+      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:18, marginTop:16 }}>登录后才能聊天</p>
+      <button className="press" onClick={()=>setShowAuth(true)} style={{ marginTop:20, background:OR, color:"#fff", padding:"12px 32px", borderRadius:12, fontWeight:700, fontSize:15 }}>立即登录</button>
+      <button onClick={()=>setView("detail")} style={{ marginTop:12, fontSize:14, color:"#78716C" }}>← 返回</button>
+    </div>
+  );
+
+  // 加载消息
+  useEffect(() => {
+    if (!supabase || !chat?.productId) return;
+    const load = async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("product_id", chat.productId)
+        .or(`from_user.eq.${user.id},to_user.eq.${user.id}`)
+        .order("created_at", { ascending: true });
+      if (data) setMsgs(data);
+      setLoading(false);
+    };
+    load();
+
+    // 实时订阅新消息
+    let sub;
+    try {
+      sub = supabase.channel(`chat_${chat.productId}_${user.id}`)
+        .on("postgres_changes", {
+          event: "INSERT", schema: "public", table: "messages",
+          filter: `product_id=eq.${chat.productId}`
+        }, payload => {
+          setMsgs(m => [...m, payload.new]);
+        })
+        .subscribe();
+    } catch(e) { console.warn("Chat realtime:", e); }
+    return () => { if(sub) supabase.removeChannel(sub); };
+  }, [chat?.productId]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior:"smooth" });
+  }, [msgs]);
+
+  const send = async () => {
+    if (!input.trim() || !supabase) return;
+    const text = input.trim();
+    setInput("");
+    const msg = {
+      from_user: user.id,
+      to_user: chat.sellerId || user.id,
+      product_id: chat.productId,
+      content: text,
+      sender_name: user.user_metadata?.name || user.email?.split("@")[0],
+      created_at: new Date().toISOString()
+    };
+    // 乐观更新
+    setMsgs(m => [...m, { ...msg, id: Date.now() }]);
+    const { error } = await supabase.from("messages").insert([msg]);
+    if (error) console.error("发送失败:", error);
   };
+
+  const isMe = (msg) => msg.from_user === user.id;
+  const myName = user.user_metadata?.name || user.email?.split("@")[0] || "我";
+  const myAv = myName[0].toUpperCase();
+
   return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"#FFFBF7" }}>
+      {/* 顶部 */}
       <div style={{ padding:"44px 16px 12px", background:"#fff", borderBottom:"1px solid #F0EBE5", display:"flex", alignItems:"center", gap:12 }}>
         <button onClick={()=>setView("detail")} style={{ fontSize:20 }}>←</button>
         <div style={{ width:38, height:38, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:16, fontFamily:"Syne,sans-serif" }}>{chat?.av}</div>
-        <div><p style={{ fontWeight:600, fontSize:14 }}>{chat?.name}</p><p style={{ fontSize:11, color:"#22c55e" }}>● 在线</p></div>
+        <div style={{ flex:1 }}>
+          <p style={{ fontWeight:600, fontSize:14 }}>{chat?.name}</p>
+          <p style={{ fontSize:11, color:"#78716C" }}>关于：{chat?.productTitle || "商品咨询"}</p>
+        </div>
       </div>
+
+      {/* 消息列表 */}
       <div style={{ flex:1, overflowY:"auto", padding:"14px 16px", display:"flex", flexDirection:"column", gap:10 }}>
-        {msgs.map((m,i)=>(
-          <div key={i} style={{ display:"flex", justifyContent:m.from==="me"?"flex-end":"flex-start" }}>
-            {m.from==="seller" && <div style={{ width:32, height:32, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:13, marginRight:8, flexShrink:0, alignSelf:"flex-end" }}>{chat?.av}</div>}
-            <div style={{ maxWidth:"72%", padding:"10px 14px", fontSize:14, lineHeight:1.55, borderRadius:m.from==="me"?"16px 16px 4px 16px":"16px 16px 16px 4px", background:m.from==="me"?OR:"#fff", color:m.from==="me"?"#fff":"#18181B", boxShadow:"0 1px 4px rgba(0,0,0,.07)" }}>{m.text}</div>
+        {loading && <p style={{ textAlign:"center", color:"#78716C", fontSize:13 }}>加载消息中…</p>}
+        {!loading && msgs.length === 0 && (
+          <div style={{ textAlign:"center", padding:"40px 0", color:"#78716C" }}>
+            <p style={{ fontSize:32 }}>👋</p>
+            <p style={{ fontSize:13, marginTop:8 }}>发消息给卖家，开始聊天吧！</p>
           </div>
-        ))}
+        )}
+        {msgs.map((m, i) => {
+          const me = isMe(m);
+          const av = me ? myAv : chat?.av;
+          return (
+            <div key={m.id || i} style={{ display:"flex", justifyContent:me?"flex-end":"flex-start", alignItems:"flex-end", gap:8 }}>
+              {!me && <div style={{ width:32, height:32, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:13, flexShrink:0 }}>{av}</div>}
+              <div style={{ maxWidth:"72%" }}>
+                <div style={{ padding:"10px 14px", fontSize:14, lineHeight:1.55, borderRadius:me?"16px 16px 4px 16px":"16px 16px 16px 4px", background:me?OR:"#fff", color:me?"#fff":"#18181B", boxShadow:"0 1px 4px rgba(0,0,0,.07)" }}>
+                  {m.content}
+                </div>
+                <p style={{ fontSize:10, color:"#78716C", marginTop:3, textAlign:me?"right":"left" }}>
+                  {m.created_at ? new Date(m.created_at).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"}) : "刚刚"}
+                </p>
+              </div>
+              {me && <div style={{ width:32, height:32, borderRadius:"50%", background:"#6366f1", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:13, flexShrink:0 }}>{myAv}</div>}
+            </div>
+          );
+        })}
         <div ref={endRef} />
       </div>
+
+      {/* 输入框 */}
       <div style={{ padding:"10px 16px", background:"#fff", borderTop:"1px solid #F0EBE5", display:"flex", gap:10 }}>
-        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} placeholder="发消息给卖家..." style={{ flex:1, padding:"11px 16px", borderRadius:24, border:"1.5px solid #F0EBE5", outline:"none", fontSize:14, background:"#fafaf9" }} />
-        <button onClick={send} className="press" style={{ width:44, height:44, borderRadius:"50%", background:OR, color:"#fff", fontSize:20, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 3px 10px rgba(249,115,22,.4)" }}>↑</button>
+        <input
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter") send(); }}
+          placeholder="发消息给卖家..."
+          style={{ flex:1, padding:"11px 16px", borderRadius:24, border:"1.5px solid #F0EBE5", outline:"none", fontSize:14, background:"#fafaf9" }}
+        />
+        <button onClick={send} disabled={!input.trim()} className="press" style={{ width:44, height:44, borderRadius:"50%", background:input.trim()?OR:"#e5e7eb", color:"#fff", fontSize:20, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:input.trim()?"0 3px 10px rgba(249,115,22,.4)":"none" }}>↑</button>
       </div>
     </div>
   );
@@ -662,7 +756,33 @@ function DiscoverShell() {
 }
 
 function MessagesShell() {
-  const { user, setShowAuth } = useApp();
+  const { user, setShowAuth, setChat, setView, products } = useApp();
+  const [convos, setConvos] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase || !user) { setLoading(false); return; }
+    const load = async () => {
+      // 取我参与的所有对话（按商品分组，取最新一条）
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .or(`from_user.eq.${user.id},to_user.eq.${user.id}`)
+        .order("created_at", { ascending: false });
+
+      if (data) {
+        // 按 product_id 分组，每组取最新一条
+        const map = {};
+        data.forEach(m => {
+          if (!map[m.product_id]) map[m.product_id] = m;
+        });
+        setConvos(Object.values(map));
+      }
+      setLoading(false);
+    };
+    load();
+  }, [user]);
+
   if (!user) return (
     <div style={{ padding:"60px 24px", textAlign:"center", color:"#78716C", background:"#FFFBF7", minHeight:"100vh" }}>
       <p style={{ fontSize:52 }}>💬</p>
@@ -671,11 +791,52 @@ function MessagesShell() {
       <button className="press" onClick={()=>setShowAuth(true)} style={{ marginTop:20, background:OR, color:"#fff", padding:"12px 32px", borderRadius:12, fontWeight:700, fontSize:14 }}>立即登录</button>
     </div>
   );
+
   return (
-    <div style={{ padding:"60px 24px", textAlign:"center", color:"#78716C", background:"#FFFBF7", minHeight:"100vh" }}>
-      <p style={{ fontSize:52 }}>💬</p>
-      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:18, marginTop:14, color:"#18181B" }}>消息中心</p>
-      <p style={{ fontSize:13, marginTop:8, lineHeight:1.6 }}>暂无新消息<br/>与卖家聊天后会显示在这里</p>
+    <div style={{ paddingBottom:"calc(60px + 12px)", background:"#FFFBF7", minHeight:"100vh" }}>
+      <div style={{ padding:"44px 16px 16px", background:OR }}>
+        <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:20, color:"#fff" }}>💬 消息中心</p>
+        <p style={{ fontSize:13, color:"rgba(255,255,255,.75)", marginTop:4 }}>与卖家的对话记录</p>
+      </div>
+
+      {loading && <p style={{ textAlign:"center", padding:40, color:"#78716C" }}>加载中…</p>}
+
+      {!loading && convos.length === 0 && (
+        <div style={{ textAlign:"center", padding:"60px 24px", color:"#78716C" }}>
+          <p style={{ fontSize:52 }}>💬</p>
+          <p style={{ fontWeight:600, fontSize:16, marginTop:14, color:"#18181B" }}>暂无消息</p>
+          <p style={{ fontSize:13, marginTop:8 }}>浏览商品，联系卖家开始聊天</p>
+        </div>
+      )}
+
+      <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:10 }}>
+        {convos.map(c => {
+          const product = products.find(p => p.id === c.product_id);
+          const isMe = c.from_user === user.id;
+          const otherName = isMe ? (product?.seller || "卖家") : (c.sender_name || "买家");
+          return (
+            <div key={c.id} className="hover-card" onClick={() => {
+              setChat({ name: otherName, av: otherName[0], productId: c.product_id, productTitle: product?.title });
+              setView("chat");
+            }} style={{ background:"#fff", borderRadius:14, padding:"14px 16px", boxShadow:"0 2px 8px rgba(0,0,0,.06)", display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}>
+              <div style={{ width:48, height:48, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:18, fontFamily:"Syne,sans-serif", flexShrink:0 }}>
+                {otherName[0]}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <p style={{ fontSize:14, fontWeight:600 }}>{otherName}</p>
+                  <p style={{ fontSize:11, color:"#78716C" }}>{new Date(c.created_at).toLocaleDateString("zh-CN")}</p>
+                </div>
+                <p style={{ fontSize:12, color:"#78716C", marginTop:3, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+                  {isMe ? "我：" : ""}{c.content}
+                </p>
+                {product && <p style={{ fontSize:11, color:OR, marginTop:2 }}>📦 {product.title}</p>}
+              </div>
+              <span style={{ fontSize:18, color:"#78716C" }}>›</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

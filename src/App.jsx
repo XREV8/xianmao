@@ -324,7 +324,7 @@ function DetailView() {
    USER APP — POST
 ══════════════════════════════════════════════════════════ */
 function PostView() {
-  const { addProduct, setView } = useApp();
+  const { addProduct, setView, user, setShowAuth } = useApp();
   const [form, setForm] = useState({ title:"", desc:"", price:"", cat:"手机数码", loc:"新加坡", cond:"九成新" });
   const [aiName, setAiName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -333,6 +333,17 @@ function PostView() {
   const [imgUrl, setImgUrl] = useState(null);
   const fileRef = useRef();
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  // 未登录提示
+  if (!user) return (
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"#FFFBF7", padding:32 }}>
+      <p style={{ fontSize:52 }}>🔐</p>
+      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:20, marginTop:16 }}>登录后才能发布</p>
+      <p style={{ color:"#78716C", marginTop:8, fontSize:14, textAlign:"center" }}>注册免费，发布商品触达东南亚华人买家</p>
+      <button className="press" onClick={()=>setShowAuth(true)} style={{ marginTop:24, background:OR, color:"#fff", padding:"14px 40px", borderRadius:14, fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:16, border:"none", cursor:"pointer" }}>立即登录 / 注册</button>
+      <button onClick={()=>setView("home")} style={{ marginTop:14, fontSize:14, color:"#78716C", background:"none", border:"none", cursor:"pointer" }}>← 返回首页</button>
+    </div>
+  );
 
   const handleAI = async () => {
     if (!aiName.trim()) return;
@@ -347,10 +358,12 @@ function PostView() {
 
   const handleSubmit = () => {
     if (!form.title.trim() || !form.price) { alert("请填写标题和价格"); return; }
+    const sellerName = user?.user_metadata?.name || user?.email?.split("@")[0] || "我";
     addProduct({
       id:Date.now(), ...form, price:Number(form.price),
       img: imgUrl || "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop",
-      seller:"我", sellerId:0, av:"我", rating:5.0, views:0, likes:0, status:"待审核", reported:false
+      seller: sellerName, sellerId:0, av:sellerName[0]||"我", rating:5.0, views:0, likes:0,
+      status:"待审核", reported:false, user_id: user?.id || null
     });
     setDone(true);
     setTimeout(()=>setView("home"), 1500);
@@ -556,11 +569,12 @@ function ChatView() {
   );
 }
 function ProfileView() {
-  const { products, setMode, setView } = useApp();
+  const { products, setMode, setView, user, setShowAuth, signOut } = useApp();
   const [showAdmin, setShowAdmin] = useState(false);
   const [pass, setPass] = useState("");
   const [err, setErr] = useState(false);
-  const mine = products.filter(p=>p.sellerId===0);
+  const mine = products.filter(p => user ? p.user_id === user.id || p.sellerId === 0 : false);
+  const displayName = user ? (user.user_metadata?.name || user.email?.split("@")[0] || "用户") : "游客";
   const menus = [["📦","我的订单"],["❤️","我的收藏"],["🔔","消息通知"],["⚙️","账号设置"],["🛡️","实名认证"],["💬","联系客服"]];
 
   const adminLogin = () => {
@@ -572,8 +586,8 @@ function ProfileView() {
     <div style={{ paddingBottom:"calc(60px + 16px)", background:"#FFFBF7", minHeight:"100vh" }}>
       <div style={{ background:OR, padding:"44px 16px 28px", textAlign:"center" }}>
         <div style={{ width:72, height:72, borderRadius:"50%", margin:"0 auto", background:"rgba(255,255,255,.2)", border:"3px solid rgba(255,255,255,.5)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:30 }}>👤</div>
-        <p style={{ color:"#fff", fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:18, marginTop:10 }}>新用户</p>
-        <p style={{ color:"rgba(255,255,255,.75)", fontSize:12, marginTop:3 }}>欢迎加入闲猫市集 🐟</p>
+        <p style={{ color:"#fff", fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:18, marginTop:10 }}>{user ? displayName : "游客"}</p>
+        <p style={{ color:"rgba(255,255,255,.75)", fontSize:12, marginTop:3 }}>{user ? user.email : "欢迎加入闲猫市集 🐟"}</p>
         <div style={{ display:"flex", justifyContent:"space-around", marginTop:18, padding:"14px 0", background:"rgba(255,255,255,.15)", borderRadius:14 }}>
           {[["0","在售"],["0","已卖出"],["5.0","信用分"]].map(([n,l])=>(
             <div key={l} style={{ textAlign:"center" }}>
@@ -600,6 +614,15 @@ function ProfileView() {
             </button>
           ))}
         </div>
+        {/* 登录/退出 */}
+        {!user ? (
+          <button className="press" onClick={()=>setShowAuth(true)} style={{ width:"100%", height:50, borderRadius:14, background:OR, color:"#fff", fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:16, border:"none", cursor:"pointer", marginTop:16, boxShadow:"0 4px 16px rgba(249,115,22,.4)" }}>
+            登录 / 注册
+          </button>
+        ) : (
+          <button className="press" onClick={signOut} style={{ width:"100%", marginTop:16, padding:"14px 0", borderRadius:12, border:"1.5px solid #F0EBE5", fontSize:14, fontWeight:600, color:"#ef4444", background:"#fff", cursor:"pointer" }}>退出登录</button>
+        )}
+
         {/* Admin Entry */}
         <div style={{ marginTop:24, borderTop:"1px solid #F0EBE5", paddingTop:16 }}>
           <button onClick={()=>setShowAdmin(!showAdmin)} style={{ fontSize:12, color:"#78716C", display:"flex", alignItems:"center", gap:6 }}>
@@ -1088,10 +1111,101 @@ function MessagesShell() {
 /* ══════════════════════════════════════════════════════════
    ROOT APP
 ══════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════
+   AUTH MODAL — 登录/注册
+══════════════════════════════════════════════════════════ */
+function AuthModal({ onClose }) {
+  const [tab, setTab] = useState("login");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [ok, setOk] = useState(false);
+
+  const inp = { width:"100%", padding:"12px 14px", borderRadius:12, border:"1.5px solid #F0EBE5", outline:"none", fontSize:14, background:"#fafaf9", marginBottom:12, boxSizing:"border-box" };
+
+  const doLogin = async () => {
+    if (!email || !password) { setMsg("请填写邮箱和密码"); setOk(false); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) { setMsg(error.message === "Invalid login credentials" ? "邮箱或密码错误" : error.message); setOk(false); }
+    else { setMsg("登录成功！"); setOk(true); setTimeout(onClose, 600); }
+  };
+
+  const doRegister = async () => {
+    if (!name || !email || !password) { setMsg("请填写所有字段"); setOk(false); return; }
+    if (password.length < 6) { setMsg("密码至少6位"); setOk(false); return; }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({ email, password, options:{ data:{ name } } });
+    if (error) { setLoading(false); setMsg(error.message); setOk(false); return; }
+    if (data?.user) {
+      await supabase.from("profiles").upsert({ id:data.user.id, name, av:name[0], status:"正常" }, { onConflict:"id" });
+      // 直接登录
+      await supabase.auth.signInWithPassword({ email, password });
+    }
+    setLoading(false);
+    setMsg("注册成功！"); setOk(true);
+    setTimeout(onClose, 600);
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.5)", zIndex:1000, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={onClose}>
+      <div style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"24px 24px 40px", width:"100%", maxWidth:430, animation:"slideUp .25s ease" }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex", marginBottom:20, background:"#f3f4f6", borderRadius:12, padding:4 }}>
+          {["login","register"].map(t=>(
+            <button key={t} onClick={()=>{setTab(t);setMsg("");}} style={{ flex:1, padding:"10px 0", borderRadius:9, fontSize:14, fontWeight:600, background:tab===t?"#fff":"transparent", color:tab===t?"#18181B":"#78716C", boxShadow:tab===t?"0 1px 4px rgba(0,0,0,.1)":"none", transition:"all .2s", border:"none", cursor:"pointer" }}>
+              {t==="login"?"登录":"注册"}
+            </button>
+          ))}
+        </div>
+        {tab==="register" && <input value={name} onChange={e=>setName(e.target.value)} placeholder="昵称（显示给买家看）" style={inp} />}
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="邮箱地址" type="email" style={inp} />
+        <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="密码（至少6位）" type="password" style={inp} onKeyDown={e=>e.key==="Enter"&&(tab==="login"?doLogin():doRegister())} />
+        {msg && <p style={{ fontSize:13, color:ok?"#16a34a":"#ef4444", marginBottom:12, fontWeight:500 }}>{ok?"✅":"❌"} {msg}</p>}
+        <button onClick={tab==="login"?doLogin:doRegister} disabled={loading} style={{ width:"100%", height:50, borderRadius:14, background:loading?"#e5e7eb":OR, color:"#fff", fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:16, border:"none", cursor:loading?"not-allowed":"pointer" }}>
+          {loading?"处理中…":tab==="login"?"登录":"注册"}
+        </button>
+        <p style={{ fontSize:12, color:"#78716C", textAlign:"center", marginTop:12 }}>游客可浏览商品，发布和聊天需要登录</p>
+      </div>
+    </div>
+  );
+}
 export default function App() {
   const [mode, setMode] = useState("user");
   const [view, setView] = useState("home");
   const [products, setProducts] = useState(INIT_PRODUCTS);
+  const [user, setUser] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [likedIds, setLikedIds] = useState(new Set());
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // ── Auth 监听 ──────────────────────────────────────────
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data:{ session } }) => setUser(session?.user ?? null));
+    const { data:{ subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) setShowAuth(false);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signOut = async () => { await supabase?.auth.signOut(); setUser(null); setLikedIds(new Set()); };
+
+  const toggleLike = async (productId) => {
+    if (!user) { setShowAuth(true); return; }
+    if (!supabase) return;
+    if (likedIds.has(productId)) {
+      await supabase.from("likes").delete().eq("user_id", user.id).eq("product_id", productId);
+      setLikedIds(s => { const n = new Set(s); n.delete(productId); return n; });
+    } else {
+      await supabase.from("likes").insert([{ user_id:user.id, product_id:productId }]);
+      setLikedIds(s => new Set([...s, productId]));
+    }
+  };
   const [users, setUsers] = useState(INIT_USERS);
   const [reports, setReports] = useState(INIT_REPORTS);
   const [selected, setSelected] = useState(null);
@@ -1145,7 +1259,7 @@ export default function App() {
   const updateUser = (id, patch) => setUsers(us => us.map(u => u.id === id ? { ...u, ...patch } : u));
   const updateReport = (id, patch) => setReports(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  const ctx = { mode, setMode, view, setView, products, users, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, updateUser, updateReport, dbReady };
+  const ctx = { mode, setMode, view, setView, products, users, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, updateUser, updateReport, dbReady, user, setUser, showAuth, setShowAuth, signOut, toggleLike, likedIds, unreadCount };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -1157,6 +1271,7 @@ export default function App() {
           </div>
         )}
         {mode==="admin" ? <AdminApp /> : <UserApp />}
+      {showAuth && <AuthModal onClose={()=>setShowAuth(false)} />}
       </div>
     </AppCtx.Provider>
   );

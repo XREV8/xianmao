@@ -1099,11 +1099,139 @@ function DiscoverShell() {
 }
 
 function MessagesShell() {
+  const { user, setShowAuth, setChat, setView, products } = useApp();
+  const [convos, setConvos] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadConvos = async () => {
+    if (!supabase || !user) return;
+    setLoading(true);
+
+    // 1. 我作为买家发出的消息
+    const { data: sent } = await supabase
+      .from("messages").select("*")
+      .eq("from_user", user.id)
+      .order("created_at", { ascending: false });
+
+    // 2. 我的商品收到的消息（我是卖家）
+    const { data: myProds } = await supabase
+      .from("products").select("id, title, user_id, seller")
+      .eq("user_id", user.id);
+
+    let received = [];
+    if (myProds?.length > 0) {
+      const { data } = await supabase
+        .from("messages").select("*")
+        .in("product_id", myProds.map(p => p.id))
+        .neq("from_user", user.id)
+        .order("created_at", { ascending: false });
+      if (data) received = data;
+    }
+
+    // 按 product_id + buyer_id 分组，每组取最新一条
+    const all = [...(sent || []), ...received];
+    const map = {};
+    all.forEach(m => {
+      const key = `${m.product_id}_${m.buyer_id || m.from_user}`;
+      if (!map[key] || new Date(m.created_at) > new Date(map[key].created_at)) {
+        map[key] = m;
+      }
+    });
+    setConvos(Object.values(map).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (user) loadConvos();
+  }, [user]);
+
+  // 每5秒刷新
+  useEffect(() => {
+    if (!user) return;
+    const t = setInterval(loadConvos, 5000);
+    return () => clearInterval(t);
+  }, [user]);
+
+  if (!user) return (
+    <div style={{ paddingBottom:"calc(60px + 12px)", background:"#FFFBF7", minHeight:"100vh" }}>
+      <div style={{ padding:"44px 16px 20px", background:OR }}>
+        <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:20, color:"#fff" }}>💬 消息中心</p>
+      </div>
+      <div style={{ textAlign:"center", padding:"60px 24px", color:"#78716C" }}>
+        <p style={{ fontSize:48 }}>💬</p>
+        <p style={{ fontWeight:600, fontSize:16, marginTop:14, color:"#18181B" }}>登录后查看消息</p>
+        <button className="press" onClick={()=>setShowAuth(true)} style={{ marginTop:20, background:OR, color:"#fff", padding:"12px 32px", borderRadius:12, fontWeight:700, fontSize:14, border:"none", cursor:"pointer" }}>立即登录</button>
+      </div>
+    </div>
+  );
+
   return (
-    <div style={{ padding:"60px 24px", textAlign:"center", color:"#78716C", animation:"fadeIn .3s", background:"#FFFBF7", minHeight:"100vh" }}>
-      <p style={{ fontSize:52 }}>💬</p>
-      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:18, marginTop:14, color:"#18181B" }}>消息中心</p>
-      <p style={{ fontSize:13, marginTop:8, lineHeight:1.6 }}>暂无新消息<br/>与卖家聊天后会显示在这里</p>
+    <div style={{ paddingBottom:"calc(60px + 12px)", background:"#FFFBF7", minHeight:"100vh" }}>
+      <div style={{ padding:"44px 16px 16px", background:OR, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
+        <div>
+          <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:20, color:"#fff" }}>💬 消息中心</p>
+          <p style={{ fontSize:12, color:"rgba(255,255,255,.8)", marginTop:3 }}>共 {convos.length} 个对话</p>
+        </div>
+        <button onClick={loadConvos} style={{ color:"rgba(255,255,255,.8)", fontSize:20, background:"none", border:"none", cursor:"pointer" }}>🔄</button>
+      </div>
+
+      {loading && <p style={{ textAlign:"center", padding:30, color:"#78716C", fontSize:13 }}>加载中…</p>}
+
+      {!loading && convos.length === 0 && (
+        <div style={{ textAlign:"center", padding:"60px 24px", color:"#78716C" }}>
+          <p style={{ fontSize:48 }}>💬</p>
+          <p style={{ fontWeight:600, fontSize:16, marginTop:14, color:"#18181B" }}>暂无消息</p>
+          <p style={{ fontSize:13, marginTop:6 }}>浏览商品，联系卖家开始聊天</p>
+        </div>
+      )}
+
+      <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:10 }}>
+        {convos.map(c => {
+          const product = products.find(p => p.id === c.product_id);
+          const iAmSeller = product?.user_id === user.id;
+          // 我是卖家显示买家名，我是买家显示卖家名
+          const otherName = iAmSeller
+            ? (c.sender_name || "买家")
+            : (product?.seller || "卖家");
+          const isUnread = c.from_user !== user.id && !c.read;
+          const buyerIdForChat = c.buyer_id || c.from_user;
+
+          return (
+            <div key={`${c.product_id}_${buyerIdForChat}`}
+              onClick={() => {
+                setChat({
+                  name: otherName,
+                  av: otherName[0],
+                  productId: c.product_id,
+                  productTitle: product?.title,
+                  sellerId: product?.user_id,
+                  buyerId: buyerIdForChat,
+                });
+                setView("chat");
+              }}
+              style={{ background:"#fff", borderRadius:14, padding:"14px 16px", boxShadow:"0 2px 8px rgba(0,0,0,.06)", display:"flex", alignItems:"center", gap:12, cursor:"pointer", border: isUnread ? `1.5px solid ${OR}` : "1.5px solid transparent", animation:"slideUp .3s ease" }}>
+              {/* 头像 */}
+              <div style={{ width:50, height:50, borderRadius:"50%", background: isUnread ? OR : "#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", color: isUnread ? "#fff" : "#78716C", fontWeight:800, fontSize:20, fontFamily:"Syne,sans-serif", flexShrink:0 }}>
+                {otherName[0]}
+              </div>
+              {/* 内容 */}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3 }}>
+                  <p style={{ fontSize:14, fontWeight: isUnread ? 700 : 600, color:"#18181B" }}>{otherName}</p>
+                  <p style={{ fontSize:11, color:"#9ca3af", flexShrink:0 }}>
+                    {new Date(c.created_at).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}
+                  </p>
+                </div>
+                <p style={{ fontSize:12, color: isUnread ? "#18181B" : "#78716C", overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis", fontWeight: isUnread ? 600 : 400 }}>
+                  {c.from_user === user.id ? "我：" : isUnread ? "🔴 " : ""}{c.content}
+                </p>
+                {product && <p style={{ fontSize:11, color:OR, marginTop:3 }}>📦 {product.title}</p>}
+              </div>
+              {isUnread && <div style={{ width:10, height:10, borderRadius:"50%", background:"#ef4444", flexShrink:0 }} />}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -759,6 +759,107 @@ function AdminSettings() {
   );
 }
 
+
+/* ══════════════════════════════════════════════════════════
+   ADMIN — USERS
+══════════════════════════════════════════════════════════ */
+function AdminUsers() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const load = async () => {
+      const { data } = await supabase.from("profiles").select("*").order("joined", { ascending: false });
+      if (data) setUsers(data);
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const banUser = async (id, banned) => {
+    if (!supabase) return;
+    await supabase.from("profiles").update({ verified: !banned }).eq("id", id);
+    setUsers(us => us.map(u => u.id === id ? { ...u, verified: !banned } : u));
+  };
+
+  return (
+    <div style={{ padding:28, overflowY:"auto", flex:1 }}>
+      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, marginBottom:6 }}>用户管理</p>
+      <p style={{ fontSize:13, color:"#78716C", marginBottom:20 }}>共 {users.length} 名注册用户</p>
+      {loading ? <p style={{ color:"#78716C" }}>加载中…</p> : (
+        <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,.06)" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead style={{ background:"#fafaf9" }}>
+              <tr>{["用户","邮箱","加入时间","认证状态","操作"].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", fontSize:12, color:"#78716C", fontWeight:600, borderBottom:"1px solid #F0EBE5" }}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {users.map(u=>(
+                <tr key={u.id} className="hover-row" style={{ borderBottom:"1px solid #F0EBE5" }}>
+                  <td style={{ padding:"12px 16px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <div style={{ width:36, height:36, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:14, fontFamily:"Syne,sans-serif" }}>{(u.name||"?")[0]}</div>
+                      <p style={{ fontSize:13, fontWeight:500 }}>{u.name||"未设置"}</p>
+                    </div>
+                  </td>
+                  <td style={{ padding:"12px 16px", fontSize:12, color:"#78716C" }}>{u.id?.slice(0,8)}…</td>
+                  <td style={{ padding:"12px 16px", fontSize:12, color:"#78716C" }}>{u.joined ? new Date(u.joined).toLocaleDateString("zh-CN") : "-"}</td>
+                  <td style={{ padding:"12px 16px" }}>
+                    {u.verified ? <span style={{ fontSize:12, color:"#16a34a", fontWeight:600 }}>✅ 已认证</span> : <span style={{ fontSize:12, color:"#78716C" }}>未认证</span>}
+                  </td>
+                  <td style={{ padding:"12px 16px" }}>
+                    <button className="press" onClick={()=>banUser(u.id, u.verified)} style={{ padding:"5px 12px", borderRadius:7, fontSize:12, fontWeight:600, background:u.verified?"#fef2f2":"#f0fdf4", color:u.verified?"#dc2626":"#16a34a" }}>
+                      {u.verified ? "取消认证" : "认证用户"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {users.length === 0 && <tr><td colSpan={5} style={{ padding:40, textAlign:"center", color:"#78716C" }}>暂无注册用户</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   ADMIN — REPORTS
+══════════════════════════════════════════════════════════ */
+function AdminReports() {
+  const { products, updateProduct } = useApp();
+  const reported = products.filter(p => p.reported || p.status === "待审核");
+  return (
+    <div style={{ padding:28, overflowY:"auto", flex:1 }}>
+      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, marginBottom:6 }}>举报 & 待审核</p>
+      <p style={{ fontSize:13, color:"#78716C", marginBottom:20 }}>共 {reported.length} 条需处理</p>
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        {reported.length === 0 && <div style={{ textAlign:"center", padding:60, color:"#78716C" }}>🎉 暂无待处理内容</div>}
+        {reported.map(p=>(
+          <div key={p.id} style={{ background:"#fff", borderRadius:14, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,.06)", display:"flex", alignItems:"center", gap:16 }}>
+            <img src={p.img||"https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100"} style={{ width:60, height:60, borderRadius:10, objectFit:"cover", flexShrink:0 }} />
+            <div style={{ flex:1 }}>
+              <p style={{ fontSize:14, fontWeight:600 }}>{p.title}</p>
+              <p style={{ fontSize:12, color:"#78716C", marginTop:3 }}>卖家：{p.seller} · {p.status==="待审核" ? "🕐 待审核" : "🚩 被举报"}</p>
+              <p style={{ fontSize:13, fontWeight:700, color:OR, marginTop:2 }}>RM {p.price}</p>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, flexShrink:0 }}>
+              {p.status==="待审核" && <>
+                <button className="press" onClick={()=>updateProduct(p.id,{status:"已上架"})} style={{ padding:"7px 16px", borderRadius:9, fontSize:13, fontWeight:600, background:"#f0fdf4", color:"#16a34a" }}>✅ 通过</button>
+                <button className="press" onClick={()=>updateProduct(p.id,{status:"已下架"})} style={{ padding:"7px 16px", borderRadius:9, fontSize:13, fontWeight:600, background:"#fef2f2", color:"#dc2626" }}>❌ 拒绝</button>
+              </>}
+              {p.reported && p.status!=="待审核" && <>
+                <button className="press" onClick={()=>updateProduct(p.id,{status:"已下架",reported:false})} style={{ padding:"7px 16px", borderRadius:9, fontSize:13, fontWeight:600, background:"#fef2f2", color:"#dc2626" }}>下架</button>
+                <button className="press" onClick={()=>updateProduct(p.id,{reported:false})} style={{ padding:"7px 16px", borderRadius:9, fontSize:13, fontWeight:600, background:"#f3f4f6", color:"#6b7280" }}>忽略</button>
+              </>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminApp() {
   const { products, reports, updateProduct, deleteProduct, setMode } = useApp();
   const [tab, setTab] = useState("dashboard");
@@ -770,8 +871,8 @@ function AdminApp() {
         {tab==="dashboard" && <AdminDashboard products={products} reports={reports} />}
         {tab==="products" && <AdminProducts products={products} updateProduct={updateProduct} deleteProduct={deleteProduct} />}
         {tab==="settings" && <AdminSettings />}
-        {tab==="users" && <div style={{ padding:28 }}><p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22 }}>用户管理</p><p style={{ color:"#78716C", marginTop:8 }}>用户数据将在此展示</p></div>}
-        {tab==="reports" && <div style={{ padding:28 }}><p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22 }}>举报处理</p><p style={{ color:"#78716C", marginTop:8 }}>举报记录将在此展示</p></div>}
+        {tab==="users" && <AdminUsers />}
+        {tab==="reports" && <AdminReports />}
       </div>
     </div>
   );

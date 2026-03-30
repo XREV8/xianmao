@@ -189,7 +189,7 @@ function ProductCard({ p, onClick }) {
    HOME VIEW
 ══════════════════════════════════════════════════════════ */
 function HomeView() {
-  const { products, setView, setSelected } = useApp();
+  const { products, setView, setSelected, refreshProducts, refreshing } = useApp();
   const [cat, setCat] = useState("全部");
   const [q, setQ] = useState("");
   const visible = products.filter(p => p.status === "已上架");
@@ -200,6 +200,10 @@ function HomeView() {
       <div style={{ background:OR, padding:"44px 16px 16px", position:"sticky", top:0, zIndex:20 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:13 }}>
           <span style={{ fontFamily:"Syne,sans-serif", fontSize:22, fontWeight:800, color:"#fff", letterSpacing:-.5 }}>🐟 闲猫市集</span>
+          <button className="press" onClick={refreshProducts} style={{ width:34, height:34, borderRadius:"50%", background:"rgba(255,255,255,.18)", color:"#fff", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}
+            title="刷新">
+            <span style={{ display:"inline-block", animation: refreshing ? "spin .6s linear infinite" : "none" }}>🔄</span>
+          </button>
         </div>
         <div style={{ background:"rgba(255,255,255,.94)", borderRadius:12, display:"flex", alignItems:"center", padding:"10px 14px", gap:8 }}>
           <span>🔍</span>
@@ -453,7 +457,7 @@ function MyProductCard({ p }) {
    PROFILE VIEW
 ══════════════════════════════════════════════════════════ */
 function ProfileView() {
-  const { products, setMode, setView, user, setShowAuth, signOut } = useApp();
+  const { products, setMode, setView, user, setShowAuth, signOut, refreshProducts, refreshing } = useApp();
   const [showAdmin, setShowAdmin] = useState(false);
   const [pass, setPass] = useState("");
   const [err, setErr] = useState(false);
@@ -511,9 +515,14 @@ function ProfileView() {
       </div>
       <div style={{ padding:16 }}>
         {/* 我的商品管理 */}
-        <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:15, marginBottom:12 }}>
-          我发布的商品 <span style={{ fontSize:12, color:"#78716C", fontWeight:400 }}>({mine.length})</span>
-        </p>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+          <p style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:15 }}>
+            我发布的商品 <span style={{ fontSize:12, color:"#78716C", fontWeight:400 }}>({mine.length})</span>
+          </p>
+          <button className="press" onClick={refreshProducts} style={{ fontSize:13, color:OR, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>
+            <span style={{ display:"inline-block", animation: refreshing ? "spin .6s linear infinite" : "none" }}>🔄</span> 刷新
+          </button>
+        </div>
         {mine.length === 0 ? (
           <div style={{ textAlign:"center", padding:"30px 0", color:"#78716C", background:"#fff", borderRadius:14, marginBottom:16 }}>
             <p style={{ fontSize:32 }}>📦</p>
@@ -1055,7 +1064,16 @@ export default function App() {
     setProducts(ps => ps.filter(p => p.id!==id));
   };
 
-  const ctx = { mode, setMode, view, setView, products, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, dbReady, user, likedIds, toggleLike, showAuth, setShowAuth, signOut };
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshProducts = async () => {
+    if (!supabase || refreshing) return;
+    setRefreshing(true);
+    const { data } = await supabase.from("products").select("*").order("created_at", { ascending: false });
+    if (data) setProducts(data.map(p => ({ sellerId:0, av:(p.seller||"?")[0], rating:p.rating??5.0, views:p.views??0, likes:p.likes??0, reported:p.reported??false, ...p })));
+    setTimeout(() => setRefreshing(false), 600);
+  };
+
+  const ctx = { mode, setMode, view, setView, products, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, dbReady, user, likedIds, toggleLike, showAuth, setShowAuth, signOut, refreshProducts };
 
   return (
     <AppCtx.Provider value={ctx}>

@@ -128,10 +128,22 @@ function AuthModal({ onClose }) {
     if (!name || !email || !password) { setMsg("请填写所有字段"); setOk(false); return; }
     if (password.length < 6) { setMsg("密码至少6位"); setOk(false); return; }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+    if (error) { setLoading(false); setMsg("注册失败：" + error.message); setOk(false); return; }
+    // 手动创建 profile，不依赖触发器
+    if (data?.user) {
+      await supabase.from("profiles").upsert({
+        id: data.user.id,
+        name: name,
+        av: name[0],
+        status: "正常"
+      }, { onConflict: "id" });
+    }
     setLoading(false);
-    if (error) { setMsg("注册失败：" + error.message); setOk(false); }
-    else { setMsg("注册成功！请查收验证邮件后登录"); setOk(true); }
+    setMsg("注册成功！正在登录…"); setOk(true);
+    // 自动登录
+    const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (!loginErr) setTimeout(onClose, 800);
   };
 
   return (
@@ -836,57 +848,93 @@ function AdminSettings() {
 function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
-  useEffect(() => {
+  const load = async () => {
     if (!supabase) return;
-    const load = async () => {
-      const { data } = await supabase.from("profiles").select("*").order("joined", { ascending: false });
-      if (data) setUsers(data);
-      setLoading(false);
-    };
-    load();
-  }, []);
+    setLoading(true);
+    const { data } = await supabase.from("profiles").select("*").order("joined", { ascending: false });
+    if (data) setUsers(data);
+    setLoading(false);
+  };
 
-  const banUser = async (id, banned) => {
+  useEffect(() => { load(); }, []);
+
+  const setStatus = async (id, status) => {
     if (!supabase) return;
-    await supabase.from("profiles").update({ verified: !banned }).eq("id", id);
-    setUsers(us => us.map(u => u.id === id ? { ...u, verified: !banned } : u));
+    await supabase.from("profiles").update({ status }).eq("id", id);
+    setUsers(us => us.map(u => u.id === id ? { ...u, status } : u));
+  };
+
+  const setVerified = async (id, verified) => {
+    if (!supabase) return;
+    await supabase.from("profiles").update({ verified }).eq("id", id);
+    setUsers(us => us.map(u => u.id === id ? { ...u, verified } : u));
+  };
+
+  const filtered = users.filter(u => !search || (u.name||"").includes(search));
+
+  const statusStyle = {
+    "正常": { bg:"#f0fdf4", color:"#16a34a" },
+    "封禁": { bg:"#fef2f2", color:"#dc2626" },
+    "警告": { bg:"#fff7ed", color:OR },
   };
 
   return (
     <div style={{ padding:28, overflowY:"auto", flex:1 }}>
-      <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, marginBottom:6 }}>用户管理</p>
-      <p style={{ fontSize:13, color:"#78716C", marginBottom:20 }}>共 {users.length} 名注册用户</p>
-      {loading ? <p style={{ color:"#78716C" }}>加载中…</p> : (
-        <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,.06)" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
-            <thead style={{ background:"#fafaf9" }}>
-              <tr>{["用户","邮箱","加入时间","认证状态","操作"].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", fontSize:12, color:"#78716C", fontWeight:600, borderBottom:"1px solid #F0EBE5" }}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {users.map(u=>(
-                <tr key={u.id} className="hover-row" style={{ borderBottom:"1px solid #F0EBE5" }}>
-                  <td style={{ padding:"12px 16px" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                      <div style={{ width:36, height:36, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:14, fontFamily:"Syne,sans-serif" }}>{(u.name||"?")[0]}</div>
-                      <p style={{ fontSize:13, fontWeight:500 }}>{u.name||"未设置"}</p>
-                    </div>
-                  </td>
-                  <td style={{ padding:"12px 16px", fontSize:12, color:"#78716C" }}>{u.id?.slice(0,8)}…</td>
-                  <td style={{ padding:"12px 16px", fontSize:12, color:"#78716C" }}>{u.joined ? new Date(u.joined).toLocaleDateString("zh-CN") : "-"}</td>
-                  <td style={{ padding:"12px 16px" }}>
-                    {u.verified ? <span style={{ fontSize:12, color:"#16a34a", fontWeight:600 }}>✅ 已认证</span> : <span style={{ fontSize:12, color:"#78716C" }}>未认证</span>}
-                  </td>
-                  <td style={{ padding:"12px 16px" }}>
-                    <button className="press" onClick={()=>banUser(u.id, u.verified)} style={{ padding:"5px 12px", borderRadius:7, fontSize:12, fontWeight:600, background:u.verified?"#fef2f2":"#f0fdf4", color:u.verified?"#dc2626":"#16a34a" }}>
-                      {u.verified ? "取消认证" : "认证用户"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {users.length === 0 && <tr><td colSpan={5} style={{ padding:40, textAlign:"center", color:"#78716C" }}>暂无注册用户</td></tr>}
-            </tbody>
-          </table>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+        <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22 }}>用户管理</p>
+        <button onClick={load} style={{ fontSize:13, color:OR, fontWeight:600, background:"none", padding:"6px 12px", borderRadius:8, border:"1.5px solid #F0EBE5" }}>🔄 刷新</button>
+      </div>
+      <p style={{ fontSize:13, color:"#78716C", marginBottom:16 }}>共 {users.length} 名注册用户</p>
+
+      {/* 搜索 */}
+      <div style={{ background:"#fff", borderRadius:10, padding:"10px 14px", display:"flex", gap:8, marginBottom:16, border:"1.5px solid #F0EBE5" }}>
+        <span>🔍</span>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索用户昵称…" style={{ flex:1, border:"none", outline:"none", fontSize:14 }} />
+      </div>
+
+      {/* 统计 */}
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        {[["全部用户", users.length, "#3b82f6"],["正常", users.filter(u=>u.status!=="封禁").length, "#16a34a"],["已封禁", users.filter(u=>u.status==="封禁").length, "#dc2626"],["已认证", users.filter(u=>u.verified).length, OR]].map(([lb,n,c])=>(
+          <div key={lb} style={{ flex:1, background:"#fff", borderRadius:12, padding:"12px 14px", boxShadow:"0 2px 6px rgba(0,0,0,.06)", textAlign:"center" }}>
+            <p style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, color:c }}>{n}</p>
+            <p style={{ fontSize:11, color:"#78716C", marginTop:2 }}>{lb}</p>
+          </div>
+        ))}
+      </div>
+
+      {loading ? <p style={{ color:"#78716C", textAlign:"center", padding:40 }}>加载中…</p> : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {filtered.map(u=>(
+            <div key={u.id} style={{ background:"#fff", borderRadius:14, padding:"16px 18px", boxShadow:"0 2px 8px rgba(0,0,0,.06)", display:"flex", alignItems:"center", gap:14, border: u.status==="封禁" ? "1.5px solid #fecaca" : "1.5px solid transparent" }}>
+              {/* 头像 */}
+              <div style={{ width:44, height:44, borderRadius:"50%", background: u.status==="封禁" ? "#fee2e2" : OR, display:"flex", alignItems:"center", justifyContent:"center", color: u.status==="封禁" ? "#dc2626" : "#fff", fontWeight:800, fontSize:18, fontFamily:"Syne,sans-serif", flexShrink:0 }}>
+                {(u.name||"?")[0]}
+              </div>
+              {/* 信息 */}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <p style={{ fontSize:14, fontWeight:600 }}>{u.name||"未设置"}</p>
+                  {u.verified && <span style={{ fontSize:10, background:"#f0fdf4", color:"#16a34a", padding:"2px 7px", borderRadius:20, fontWeight:600 }}>✅ 认证</span>}
+                  {u.status==="封禁" && <span style={{ fontSize:10, background:"#fef2f2", color:"#dc2626", padding:"2px 7px", borderRadius:20, fontWeight:600 }}>🚫 已封禁</span>}
+                </div>
+                <p style={{ fontSize:11, color:"#78716C", marginTop:2 }}>ID: {u.id?.slice(0,12)}… · 加入: {u.joined ? new Date(u.joined).toLocaleDateString("zh-CN") : "-"}</p>
+              </div>
+              {/* 操作按钮 */}
+              <div style={{ display:"flex", flexDirection:"column", gap:6, flexShrink:0 }}>
+                {u.status !== "封禁" ? (
+                  <button className="press" onClick={()=>setStatus(u.id,"封禁")} style={{ padding:"6px 14px", borderRadius:8, fontSize:12, fontWeight:600, background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca" }}>🚫 封禁</button>
+                ) : (
+                  <button className="press" onClick={()=>setStatus(u.id,"正常")} style={{ padding:"6px 14px", borderRadius:8, fontSize:12, fontWeight:600, background:"#f0fdf4", color:"#16a34a", border:"1px solid #bbf7d0" }}>✅ 解封</button>
+                )}
+                <button className="press" onClick={()=>setVerified(u.id, !u.verified)} style={{ padding:"6px 14px", borderRadius:8, fontSize:12, fontWeight:600, background: u.verified?"#fff7ed":"#f0fdf4", color: u.verified?OR:"#16a34a", border:`1px solid ${u.verified?"#fed7aa":"#bbf7d0"}` }}>
+                  {u.verified ? "取消认证" : "认证用户"}
+                </button>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && <div style={{ textAlign:"center", padding:60, color:"#78716C" }}>暂无用户</div>}
         </div>
       )}
     </div>

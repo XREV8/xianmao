@@ -599,16 +599,24 @@ function ChatView() {
   useEffect(() => {
     if (!supabase || !chat?.productId) return;
 
+    // 确定对话双方：买家 ID（buyer_id）
+    // 如果我是买家：我 vs 卖家
+    // 如果我是卖家：我 vs chat.buyerId
+    const buyerId = chat.buyerId || user.id;
+    const sellerId = chat.sellerId || null;
+
     const load = async (showLoading = false) => {
       if (showLoading) setLoading(true);
-      const { data } = await supabase
+      let query = supabase
         .from("messages")
         .select("*")
         .eq("product_id", chat.productId)
+        .eq("buyer_id", buyerId)
         .order("created_at", { ascending: true });
+
+      const { data } = await query;
       if (data) {
         setMsgs(prev => {
-          // 只在有新消息时更新，避免闪烁
           if (JSON.stringify(prev.map(m=>m.id)) === JSON.stringify(data.map(m=>m.id))) return prev;
           return data;
         });
@@ -630,7 +638,7 @@ function ChatView() {
     // Realtime 订阅（可选，作为补充）
     let sub;
     try {
-      sub = supabase.channel(`chat_${chat.productId}_${Date.now()}`)
+      sub = supabase.channel(`chat_${chat.productId}_${buyerId}_${Date.now()}`)
         .on("postgres_changes", {
           event: "INSERT", schema: "public", table: "messages",
           filter: `product_id=eq.${chat.productId}`
@@ -656,6 +664,7 @@ function ChatView() {
       from_user: user.id,
       to_user: chat.sellerId || null,
       product_id: chat.productId,
+      buyer_id: buyerId,        // 关键字段：标识哪个买家的对话
       content: text,
       sender_name: user.user_metadata?.name || user.email?.split("@")[0] || "用户",
       created_at: new Date().toISOString()
@@ -815,12 +824,13 @@ function MessagesShell() {
         if (recvMsgs) received = recvMsgs;
       }
 
-      // 合并 + 按 product_id 分组取最新
+      // 按 product_id + buyer_id 分组（每个买家和卖家独立对话）
       const all = [...(sent||[]), ...received];
       const map = {};
       all.forEach(m => {
-        if (!map[m.product_id] || new Date(m.created_at) > new Date(map[m.product_id].created_at)) {
-          map[m.product_id] = m;
+        const key = `${m.product_id}_${m.buyer_id || m.from_user}`;
+        if (!map[key] || new Date(m.created_at) > new Date(map[key].created_at)) {
+          map[key] = m;
         }
       });
       setConvos(Object.values(map).sort((a,b) => new Date(b.created_at) - new Date(a.created_at)));
@@ -861,11 +871,25 @@ function MessagesShell() {
       <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:10 }}>
         {convos.map(c => {
           const product = products.find(p => p.id === c.product_id);
+          const iAmSeller = product?.user_id === user.id;
           const isMe = c.from_user === user.id;
-          const otherName = isMe ? (product?.seller || "卖家") : (c.sender_name || "买家");
+          // 如果我是卖家，显示买家名字；如果我是买家，显示卖家名字
+          const otherName = iAmSeller
+            ? (c.sender_name || "买家")
+            : (product?.seller || "卖家");
           return (
             <div key={c.id} className="hover-card" onClick={() => {
-              setChat({ name: otherName, av: otherName[0], productId: c.product_id, productTitle: product?.title });
+              // 判断我是买家还是卖家
+              const iAmBuyer = c.buyer_id === user.id || c.from_user === user.id;
+              const buyerIdForChat = c.buyer_id || c.from_user;
+              setChat({
+                name: otherName,
+                av: otherName[0],
+                productId: c.product_id,
+                productTitle: product?.title,
+                sellerId: product?.user_id,
+                buyerId: buyerIdForChat,
+              });
               setView("chat");
             }} style={{ background:"#fff", borderRadius:14, padding:"14px 16px", boxShadow:"0 2px 8px rgba(0,0,0,.06)", display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}>
               <div style={{ width:48, height:48, borderRadius:"50%", background:OR, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:18, fontFamily:"Syne,sans-serif", flexShrink:0 }}>

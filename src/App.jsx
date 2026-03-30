@@ -595,40 +595,53 @@ function ChatView() {
     </div>
   );
 
-  // 加载消息 — 按商品 ID 加载，买卖双方都能看到
+  // 加载消息 — 轮询 + Realtime 双保险
   useEffect(() => {
     if (!supabase || !chat?.productId) return;
-    const load = async () => {
-      setLoading(true);
-      // 取该商品下所有消息（买家发的 + 卖家回复的）
-      const { data, error } = await supabase
+
+    const load = async (showLoading = false) => {
+      if (showLoading) setLoading(true);
+      const { data } = await supabase
         .from("messages")
         .select("*")
         .eq("product_id", chat.productId)
         .order("created_at", { ascending: true });
-      if (data) setMsgs(data);
-      if (error) console.error("加载消息失败:", error);
-      setLoading(false);
+      if (data) {
+        setMsgs(prev => {
+          // 只在有新消息时更新，避免闪烁
+          if (JSON.stringify(prev.map(m=>m.id)) === JSON.stringify(data.map(m=>m.id))) return prev;
+          return data;
+        });
+        // 标记对方发的消息为已读
+        const unread = data.filter(m => m.from_user !== user.id && m.read === false);
+        if (unread.length > 0) {
+          await supabase.from("messages").update({ read: true })
+            .in("id", unread.map(m=>m.id));
+        }
+      }
+      if (showLoading) setLoading(false);
     };
-    load();
 
-    // 实时订阅 — 该商品有新消息就推送
+    load(true);
+
+    // 轮询：每3秒拉一次新消息（确保可靠）
+    const interval = setInterval(() => load(false), 3000);
+
+    // Realtime 订阅（可选，作为补充）
     let sub;
     try {
-      sub = supabase.channel(`chat_product_${chat.productId}`)
+      sub = supabase.channel(`chat_${chat.productId}_${Date.now()}`)
         .on("postgres_changes", {
           event: "INSERT", schema: "public", table: "messages",
           filter: `product_id=eq.${chat.productId}`
-        }, payload => {
-          setMsgs(m => {
-            // 避免重复（乐观更新已经加了一条）
-            if (m.find(msg => msg.id === payload.new.id)) return m;
-            return [...m, payload.new];
-          });
-        })
+        }, () => load(false))
         .subscribe();
-    } catch(e) { console.warn("Chat realtime:", e); }
-    return () => { if(sub) supabase.removeChannel(sub); };
+    } catch(e) {}
+
+    return () => {
+      clearInterval(interval);
+      if(sub) supabase.removeChannel(sub);
+    };
   }, [chat?.productId]);
 
   useEffect(() => {
@@ -727,12 +740,12 @@ function ChatView() {
    BOTTOM NAV
 ══════════════════════════════════════════════════════════ */
 function BottomNav() {
-  const { view, setView } = useApp();
+  const { view, setView, unreadCount } = useApp();
   const items = [
     {k:"home",ic:"🏠",lb:"首页"},
     {k:"discover",ic:"🧭",lb:"发现"},
     {k:"post",ic:"+",lb:"发布",main:true},
-    {k:"messages",ic:"💬",lb:"消息"},
+    {k:"messages",ic:"💬",lb:"消息",badge:true},
     {k:"profile",ic:"👤",lb:"我的"},
   ];
   return (
@@ -776,7 +789,7 @@ function MessagesShell() {
 
   useEffect(() => {
     if (!supabase || !user) { setLoading(false); return; }
-    const load = async () => {
+    const load = async (showLoading = true) => {
       // 1. 找我发的消息（作为买家）
       const { data: sent } = await supabase
         .from("messages")
@@ -811,9 +824,12 @@ function MessagesShell() {
         }
       });
       setConvos(Object.values(map).sort((a,b) => new Date(b.created_at) - new Date(a.created_at)));
-      setLoading(false);
+      if (showLoading) setLoading(false);
     };
-    load();
+    load(true);
+    // 轮询：每5秒刷新会话列表
+    const interval = setInterval(() => load(false), 5000);
+    return () => clearInterval(interval);
   }, [user]);
 
   if (!user) return (
@@ -860,8 +876,8 @@ function MessagesShell() {
                   <p style={{ fontSize:14, fontWeight:600 }}>{otherName}</p>
                   <p style={{ fontSize:11, color:"#78716C" }}>{new Date(c.created_at).toLocaleDateString("zh-CN")}</p>
                 </div>
-                <p style={{ fontSize:12, color:"#78716C", marginTop:3, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
-                  {isMe ? "我：" : ""}{c.content}
+                <p style={{ fontSize:12, color: (!isMe && c.read === false) ? "#18181B" : "#78716C", marginTop:3, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis", fontWeight: (!isMe && c.read === false) ? 600 : 400 }}>
+                  {isMe ? "我：" : "🔴 "}{c.content}
                 </p>
                 {product && <p style={{ fontSize:11, color:OR, marginTop:2 }}>📦 {product.title}</p>}
               </div>
@@ -1225,6 +1241,27 @@ export default function App() {
   const [likedIds, setLikedIds] = useState(new Set());
   const [showAuth, setShowAuth] = useState(false);
 
+  // ── 未读消息数轮询 ──────────────────────────────────────
+  useEffect(() => {
+    if (!supabase || !user) { setUnreadCount(0); return; }
+    const checkUnread = async () => {
+      // 我的商品收到的消息
+      const { data: myProds } = await supabase.from("products").select("id").eq("user_id", user.id);
+      let count = 0;
+      if (myProds?.length > 0) {
+        const { data } = await supabase.from("messages").select("id", { count:"exact" })
+          .in("product_id", myProds.map(p=>p.id))
+          .neq("from_user", user.id)
+          .eq("read", false);
+        count += data?.length || 0;
+      }
+      setUnreadCount(count);
+    };
+    checkUnread();
+    const interval = setInterval(checkUnread, 8000); // 每8秒检查一次
+    return () => clearInterval(interval);
+  }, [user]);
+
   // ── Auth 状态监听 ──────────────────────────────────────
   useEffect(() => {
     if (!supabase) return;
@@ -1307,6 +1344,7 @@ export default function App() {
   };
 
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const refreshProducts = async () => {
     if (!supabase || refreshing) return;
     setRefreshing(true);
@@ -1315,7 +1353,7 @@ export default function App() {
     setTimeout(() => setRefreshing(false), 600);
   };
 
-  const ctx = { mode, setMode, view, setView, products, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, dbReady, user, likedIds, toggleLike, showAuth, setShowAuth, signOut, refreshProducts };
+  const ctx = { mode, setMode, view, setView, products, reports, selected, setSelected, chat, setChat, addProduct, updateProduct, deleteProduct, dbReady, user, likedIds, toggleLike, showAuth, setShowAuth, signOut, refreshProducts, unreadCount, setUnreadCount };
 
   return (
     <AppCtx.Provider value={ctx}>

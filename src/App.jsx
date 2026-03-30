@@ -595,31 +595,36 @@ function ChatView() {
     </div>
   );
 
-  // 加载消息
+  // 加载消息 — 按商品 ID 加载，买卖双方都能看到
   useEffect(() => {
     if (!supabase || !chat?.productId) return;
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase
+      // 取该商品下所有消息（买家发的 + 卖家回复的）
+      const { data, error } = await supabase
         .from("messages")
         .select("*")
         .eq("product_id", chat.productId)
-        .or(`from_user.eq.${user.id},to_user.eq.${user.id}`)
         .order("created_at", { ascending: true });
       if (data) setMsgs(data);
+      if (error) console.error("加载消息失败:", error);
       setLoading(false);
     };
     load();
 
-    // 实时订阅新消息
+    // 实时订阅 — 该商品有新消息就推送
     let sub;
     try {
-      sub = supabase.channel(`chat_${chat.productId}_${user.id}`)
+      sub = supabase.channel(`chat_product_${chat.productId}`)
         .on("postgres_changes", {
           event: "INSERT", schema: "public", table: "messages",
           filter: `product_id=eq.${chat.productId}`
         }, payload => {
-          setMsgs(m => [...m, payload.new]);
+          setMsgs(m => {
+            // 避免重复（乐观更新已经加了一条）
+            if (m.find(msg => msg.id === payload.new.id)) return m;
+            return [...m, payload.new];
+          });
         })
         .subscribe();
     } catch(e) { console.warn("Chat realtime:", e); }
@@ -636,16 +641,25 @@ function ChatView() {
     setInput("");
     const msg = {
       from_user: user.id,
-      to_user: chat.sellerId || user.id,
+      to_user: chat.sellerId || null,
       product_id: chat.productId,
       content: text,
-      sender_name: user.user_metadata?.name || user.email?.split("@")[0],
+      sender_name: user.user_metadata?.name || user.email?.split("@")[0] || "用户",
       created_at: new Date().toISOString()
     };
-    // 乐观更新
-    setMsgs(m => [...m, { ...msg, id: Date.now() }]);
-    const { error } = await supabase.from("messages").insert([msg]);
-    if (error) console.error("发送失败:", error);
+    // 乐观更新（先显示，再保存）
+    const tempId = `temp_${Date.now()}`;
+    setMsgs(m => [...m, { ...msg, id: tempId }]);
+    const { data, error } = await supabase.from("messages").insert([msg]).select().single();
+    if (error) {
+      console.error("发送失败:", error);
+      // 回滚
+      setMsgs(m => m.filter(msg => msg.id !== tempId));
+      alert("发送失败，请重试");
+    } else if (data) {
+      // 用真实数据替换临时数据
+      setMsgs(m => m.map(msg => msg.id === tempId ? data : msg));
+    }
   };
 
   const isMe = (msg) => msg.from_user === user.id;
@@ -763,21 +777,40 @@ function MessagesShell() {
   useEffect(() => {
     if (!supabase || !user) { setLoading(false); return; }
     const load = async () => {
-      // 取我参与的所有对话（按商品分组，取最新一条）
-      const { data } = await supabase
+      // 1. 找我发的消息（作为买家）
+      const { data: sent } = await supabase
         .from("messages")
         .select("*")
-        .or(`from_user.eq.${user.id},to_user.eq.${user.id}`)
+        .eq("from_user", user.id)
         .order("created_at", { ascending: false });
 
-      if (data) {
-        // 按 product_id 分组，每组取最新一条
-        const map = {};
-        data.forEach(m => {
-          if (!map[m.product_id]) map[m.product_id] = m;
-        });
-        setConvos(Object.values(map));
+      // 2. 找我商品下收到的消息（作为卖家）
+      const { data: myProducts } = await supabase
+        .from("products")
+        .select("id, title, seller")
+        .eq("user_id", user.id);
+
+      let received = [];
+      if (myProducts && myProducts.length > 0) {
+        const productIds = myProducts.map(p => p.id);
+        const { data: recvMsgs } = await supabase
+          .from("messages")
+          .select("*")
+          .in("product_id", productIds)
+          .neq("from_user", user.id)
+          .order("created_at", { ascending: false });
+        if (recvMsgs) received = recvMsgs;
       }
+
+      // 合并 + 按 product_id 分组取最新
+      const all = [...(sent||[]), ...received];
+      const map = {};
+      all.forEach(m => {
+        if (!map[m.product_id] || new Date(m.created_at) > new Date(map[m.product_id].created_at)) {
+          map[m.product_id] = m;
+        }
+      });
+      setConvos(Object.values(map).sort((a,b) => new Date(b.created_at) - new Date(a.created_at)));
       setLoading(false);
     };
     load();
